@@ -434,6 +434,120 @@ const getPoAmountUsdSum = async (req, res) => {
   }
 };
 
+// GET /api/exposures/payables
+const getPayablesByCurrency = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT po_amount, po_currency FROM exposures WHERE type = 'po' OR type = 'payable' OR type = 'PO'"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.po_currency || "").toUpperCase();
+      const amount = Number(row.po_amount) || 0;
+      currencyTotals[currency] =
+        (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
+    }
+    const payablesData = Object.entries(currencyTotals).map(
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${amount.toFixed(1)}M`,
+      })
+    );
+    res.json(payablesData);
+  } catch (err) {
+    console.error("Error fetching payables by currency:", err);
+    res.status(500).json({ error: "Failed to fetch payables by currency" });
+  }
+};
+
+// GET /api/exposures/receivables
+const getReceivablesByCurrency = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT po_amount, po_currency FROM exposures WHERE type = 'so' OR type = 'receivable'"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.po_currency || "").toUpperCase();
+      const amount = Number(row.po_amount) || 0;
+      currencyTotals[currency] =
+        (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
+    }
+    const receivablesData = Object.entries(currencyTotals).map(
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${amount.toFixed(1)}M`,
+      })
+    );
+    res.json(receivablesData);
+  } catch (err) {
+    console.error("Error fetching receivables by currency:", err);
+    res.status(500).json({ error: "Failed to fetch receivables by currency" });
+  }
+};
+
+// GET /api/exposures/getpoAmountByCurrency
+const getAmountByCurrency = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT po_amount, po_currency FROM exposures"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.po_currency || "").toUpperCase();
+      const amount = Number(row.po_amount) || 0;
+      currencyTotals[currency] =
+        (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
+    }
+    const payablesData = Object.entries(currencyTotals).map(
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${amount.toFixed(1)}M`,
+      })
+    );
+    res.json(payablesData);
+  } catch (err) {
+    console.error("Error fetching payables by currency:", err);
+    res.status(500).json({ error: "Failed to fetch payables by currency" });
+  }
+};
+
 module.exports = {
   getUserVars,
   getRenderVars,
@@ -445,6 +559,9 @@ module.exports = {
   rejectMultipleExposures,
   getBuMaturityCurrencySummary,
   getTopCurrencies,
-  getPoAmountUsdSum
+  getPoAmountUsdSum,
+  getAmountByCurrency,
+  getReceivablesByCurrency,
+  getPayablesByCurrency
   
 };
