@@ -462,7 +462,7 @@ const getPayablesByCurrency = async (req, res) => {
     const payablesData = Object.entries(currencyTotals).map(
       ([currency, amount]) => ({
         currency,
-        amount: `$${amount.toFixed(1)}M`,
+        amount: `$${(amount/1000000).toFixed(1)}M`,
       })
     );
     res.json(payablesData);
@@ -500,7 +500,7 @@ const getReceivablesByCurrency = async (req, res) => {
     const receivablesData = Object.entries(currencyTotals).map(
       ([currency, amount]) => ({
         currency,
-        amount: `$${amount.toFixed(1)}M`,
+        amount: `$${(amount/1000000).toFixed(1)}M`,
       })
     );
     res.json(receivablesData);
@@ -536,11 +536,12 @@ const getAmountByCurrency = async (req, res) => {
         (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
     }
     const payablesData = Object.entries(currencyTotals).map(
-      ([currency, amount]) => ({
-        currency,
-        amount: `$${amount.toFixed(1)}M`,
-      })
-    );
+  ([currency, amount]) => ({
+    currency,
+    amount: `$${(amount / 1000000).toFixed(1)}M`,
+  })
+);
+
     res.json(payablesData);
   } catch (err) {
     console.error("Error fetching payables by currency:", err);
