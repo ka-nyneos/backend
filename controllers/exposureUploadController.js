@@ -276,37 +276,15 @@ const rejectMultipleExposures = async (req, res) => {
   }
 
   try {
-    const { rows: existingExposures } = await pool.query(
-      `SELECT id, status FROM exposures WHERE id = ANY($1::uuid[])`,
+    const result = await pool.query(
+      `UPDATE exposures
+       SET status = 'Rejected'
+       WHERE id = ANY($1::uuid[])
+       RETURNING *`,
       [exposureIds]
     );
 
-    const toDelete = existingExposures
-      .filter(row => row.status === "Delete-Approval")
-      .map(row => row.id);
-
-    const toReject = existingExposures
-      .filter(row => row.status !== "Delete-Approval")
-      .map(row => row.id);
-
-    const results = {
-      deleted: [],
-      rejected: [],
-    };
-
-    // Reject remaining exposures
-    if (toReject.length > 0) {
-      const rejected = await pool.query(
-        `UPDATE exposures
-         SET status = 'Rejected'
-         WHERE id = ANY($1::uuid[])
-         RETURNING *`,
-        [ toReject]
-      );
-      results.rejected = rejected.rows;
-    }
-
-    res.status(200).json({ success: true, ...results });
+    res.status(200).json({ success: true, rejected: result.rows });
   } catch (err) {
     console.error("rejectMultipleExposures error:", err);
     res.status(500).json({ success: false, error: err.message });
