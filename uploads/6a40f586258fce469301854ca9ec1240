@@ -1,0 +1,4 @@
+reference_no,type,business_unit,vendor_beneficiary,po_amount,po_detail,po_currency,maturity_expiry_date,linked_id,y,p
+REF0091,payable,BU1,Vendor A,10000,Office Chairs,USD,2025-12-31,LNK123,,
+REF00991,receivable,BU2,Vendor B,5000,Laptops,INR,2025-10-15,LNK124,,
+REF00122,payable,BU3,Vendor C,7500,Monitors,EUR,2025-09-01,LNK125,,
