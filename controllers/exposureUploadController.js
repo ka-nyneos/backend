@@ -462,7 +462,7 @@ const getPayablesByCurrency = async (req, res) => {
     const payablesData = Object.entries(currencyTotals).map(
       ([currency, amount]) => ({
         currency,
-        amount: `$${(amount/1000000).toFixed(1)}M`,
+        amount: `$${(amount/1000).toFixed(1)}K`,
       })
     );
     res.json(payablesData);
@@ -500,7 +500,7 @@ const getReceivablesByCurrency = async (req, res) => {
     const receivablesData = Object.entries(currencyTotals).map(
       ([currency, amount]) => ({
         currency,
-        amount: `$${(amount/1000000).toFixed(1)}M`,
+        amount: `$${(amount/1000).toFixed(1)}K`,
       })
     );
     res.json(receivablesData);
@@ -538,7 +538,7 @@ const getAmountByCurrency = async (req, res) => {
     const payablesData = Object.entries(currencyTotals).map(
   ([currency, amount]) => ({
     currency,
-    amount: `$${(amount / 1000000).toFixed(1)}M`,
+    amount: `$${(amount / 1000).toFixed(1)}K`,
   })
 );
 
