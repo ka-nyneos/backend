@@ -80,7 +80,7 @@ const getUserJourney = (req, res) => {
 
 const getPendingApprovalVars = async (req, res) => {
   try {
-    const pendingExposuresResult = await pool.query("SELECT * FROM exposures WHERE status = 'pending' OR status = 'Pending'");
+    const pendingExposuresResult = await pool.query("SELECT * FROM exposures WHERE status = 'pending' OR status = 'Pending' or status='Delete-approval' or status='Delete Approval'");
     res.json({
       isLoadable: true,
       allExposuresTab: false,
@@ -193,9 +193,8 @@ const deleteExposure = async (req, res) => {
   try {
     const { rowCount } = await pool.query(
       `UPDATE exposures 
-       SET status = 'Delete-Approval', approval_comment = $1, approved_by = $2, approved_at = NOW()
-       WHERE id = $3`,
-      [delete_comment || '', requested_by, id]
+       SET status = 'Delete-Approval' WHERE id = $1`,
+      [id]
     );
 
     if (rowCount === 0) {
@@ -220,7 +219,7 @@ const approveMultipleExposures = async (req, res) => {
   try {
     // Fetch current statuses
     const { rows: existingExposures } = await pool.query(
-      `SELECT id, status FROM exposures WHERE reference_no = ANY($1::int[])`,
+      `SELECT id, status FROM exposures WHERE id = ANY($1::uuid[])`,
       [exposureIds]
     );
 
@@ -240,7 +239,7 @@ const approveMultipleExposures = async (req, res) => {
     // Delete exposures
     if (toDelete.length > 0) {
       const deleted = await pool.query(
-        `DELETE FROM exposures WHERE reference_no = ANY($1::int[]) RETURNING *`,
+        `DELETE FROM exposures WHERE id = ANY($1::uuid[]) RETURNING *`,
         [toDelete]
       );
       results.deleted = deleted.rows;
@@ -250,10 +249,10 @@ const approveMultipleExposures = async (req, res) => {
     if (toApprove.length > 0) {
       const approved = await pool.query(
         `UPDATE exposures
-         SET status = 'Approved', approved_by = $1, approved_at = NOW(), approval_comment = $2
-         WHERE reference_no = ANY($3::int[])
+         SET status = 'Approved'
+         WHERE id = ANY($1::uuid[])
          RETURNING *`,
-        [approved_by, approval_comment || '', toApprove]
+        [ toApprove]
       );
       results.approved = approved.rows;
     }
@@ -274,7 +273,7 @@ const rejectMultipleExposures = async (req, res) => {
 
   try {
     const { rows: existingExposures } = await pool.query(
-      `SELECT id, status FROM exposures WHERE reference_no = ANY($1::int[])`,
+      `SELECT id, status FROM exposures WHERE id = ANY($1::uuid[])`,
       [exposureIds]
     );
 
@@ -294,7 +293,7 @@ const rejectMultipleExposures = async (req, res) => {
     // Delete exposures
     if (toDelete.length > 0) {
       const deleted = await pool.query(
-        `DELETE FROM exposures WHERE reference_no = ANY($1::int[]) RETURNING *`,
+        `DELETE FROM exposures WHERE id = ANY($1::uuid[]) RETURNING *`,
         [toDelete]
       );
       results.deleted = deleted.rows;
@@ -304,10 +303,10 @@ const rejectMultipleExposures = async (req, res) => {
     if (toReject.length > 0) {
       const rejected = await pool.query(
         `UPDATE exposures
-         SET status = 'Rejected', approved_by = $1, approved_at = NOW(), approval_comment = $2
-         WHERE reference_no = ANY($3::int[])
+         SET status = 'Rejected'
+         WHERE id = ANY($1::uuid[])
          RETURNING *`,
-        [rejected_by, rejection_comment || '', toReject]
+        [ toReject]
       );
       results.rejected = rejected.rows;
     }
