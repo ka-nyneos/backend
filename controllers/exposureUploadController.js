@@ -365,6 +365,42 @@ const getBuMaturityCurrencySummary = async (req, res) => {
   }
 };
 
+const getTopCurrencies = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query("SELECT po_amount, po_currency FROM exposures");
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.po_currency || '').toUpperCase();
+      const amount = Number(row.po_amount) || 0;
+      const usdValue = amount * (rates[currency] || 1.0);
+      currencyTotals[currency] = (currencyTotals[currency] || 0) + usdValue;
+    }
+    // Sort currencies by value descending and take top 5
+    const sorted = Object.entries(currencyTotals).sort((a, b) => b[1] - a[1]);
+    const topCurrencies = sorted.slice(0, 5).map(([currency, value], idx) => ({
+      currency,
+      value: Number(value.toFixed(1)),
+      color: idx === 0 ? "bg-green-400" : idx === 1 ? "bg-blue-400" : idx === 2 ? "bg-yellow-400" : idx === 3 ? "bg-red-400" : "bg-purple-400",
+    }));
+    res.json(topCurrencies);
+  } catch (err) {
+    console.error("Error fetching top currencies:", err);
+    res.status(500).json({ error: "Failed to fetch top currencies" });
+  }
+};
+
 
 module.exports = {
   getUserVars,
@@ -375,6 +411,7 @@ module.exports = {
   deleteExposure,
   approveMultipleExposures,
   rejectMultipleExposures,
-  getBuMaturityCurrencySummary
+  getBuMaturityCurrencySummary,
+  getTopCurrencies
   
 };
