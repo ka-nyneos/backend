@@ -15,7 +15,7 @@ router.get("/userJourney", exposureUploadController.getUserJourney);
 router.post("/bulkApprove", exposureUploadController.approveMultipleExposures);
 router.post("/bulkReject", exposureUploadController.rejectMultipleExposures);
 router.post("/deleteExposure", exposureUploadController.deleteExposure);
-
+router.get("/netanalysis", exposureUploadController.getBuMaturityCurrencySummary);
 // Upload CSV Route — note the controller function used
 router.post("/upload-csv", upload.single("file"), exposureUploadController.uploadExposuresFromCSV);
 
