@@ -292,6 +292,79 @@ const rejectMultipleExposures = async (req, res) => {
 };
 
 
+const getBuMaturityCurrencySummary = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT business_unit, po_currency, type,
+              month_1, month_2, month_3, month_4, month_4_6, month_6plus
+       FROM exposures`
+    );
+
+    const summary = {};
+    const maturityBuckets = [
+      "month_1",
+      "month_2",
+      "month_3",
+      "month_4",
+      "month_4_6",
+      "month_6plus",
+    ];
+
+    const bucketLabels = {
+      month_1: "1 Month",
+      month_2: "2 Month",
+      month_3: "3 Month",
+      month_4: "4 Month",
+      month_4_6: "4-6 Month",
+      month_6plus: "6 Month +",
+    };
+
+    for (const row of result.rows) {
+      const bu = row.business_unit || "Unknown";
+      const currency = (row.po_currency || "Unknown").toUpperCase();
+      const type = (row.type || "").toLowerCase();
+
+      for (const bucket of maturityBuckets) {
+        const amount = Number(row[bucket]) || 0;
+        if (amount === 0) continue;
+
+        if (!summary[bucket]) summary[bucket] = {};
+        if (!summary[bucket][bu]) summary[bucket][bu] = {};
+        if (!summary[bucket][bu][currency])
+          summary[bucket][bu][currency] = { payable: 0, receivable: 0 };
+
+        if (["payable", "po"].includes(type)) {
+          summary[bucket][bu][currency].payable += amount;
+        } else if (["receivable", "so"].includes(type)) {
+          summary[bucket][bu][currency].receivable += amount;
+        }
+      }
+    }
+
+    const response = [];
+    for (const bucket in summary) {
+      const maturityLabel = bucketLabels[bucket] || bucket;
+      for (const bu in summary[bucket]) {
+        for (const currency in summary[bucket][bu]) {
+          const { payable, receivable } = summary[bucket][bu][currency];
+          response.push({
+            maturity: maturityLabel,
+            bu,
+            currency,
+            payable,
+            receivable,
+          });
+        }
+      }
+    }
+
+    res.json(response);
+  } catch (err) {
+    console.error("Error fetching maturity summary:", err);
+    res.status(500).json({ error: "Failed to fetch summary" });
+  }
+};
+
 
 module.exports = {
   getUserVars,
@@ -302,4 +375,6 @@ module.exports = {
   deleteExposure,
   approveMultipleExposures,
   rejectMultipleExposures,
+  getBuMaturityCurrencySummary
+  
 };
