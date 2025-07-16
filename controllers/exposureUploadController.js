@@ -402,6 +402,38 @@ const getTopCurrencies = async (req, res) => {
 };
 
 
+const getPoAmountUsdSum = async (req, res) => {
+  // Exchange rates to USD
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT po_amount, po_currency FROM exposures"
+    );
+    let totalUsd = 0;
+    for (const row of result.rows) {
+      const amount = Number(row.po_amount) || 0;
+      const currency = (row.po_currency || "").toUpperCase();
+      const rate = rates[currency] || 1.0;
+      totalUsd += amount * rate;
+    }
+    res.json({ totalUsd });
+  } catch (err) {
+    console.error("Error calculating PO amount sum in USD:", err);
+    res.status(500).json({ error: "Failed to calculate PO amount sum in USD" });
+  }
+};
+
 module.exports = {
   getUserVars,
   getRenderVars,
@@ -412,6 +444,7 @@ module.exports = {
   approveMultipleExposures,
   rejectMultipleExposures,
   getBuMaturityCurrencySummary,
-  getTopCurrencies
+  getTopCurrencies,
+  getPoAmountUsdSum
   
 };
