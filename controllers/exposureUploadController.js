@@ -294,15 +294,6 @@ const rejectMultipleExposures = async (req, res) => {
       rejected: [],
     };
 
-    // Delete exposures
-    if (toDelete.length > 0) {
-      const deleted = await pool.query(
-        `DELETE FROM exposures WHERE id = ANY($1::uuid[]) RETURNING *`,
-        [toDelete]
-      );
-      results.deleted = deleted.rows;
-    }
-
     // Reject remaining exposures
     if (toReject.length > 0) {
       const rejected = await pool.query(
