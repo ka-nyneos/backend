@@ -80,7 +80,7 @@ const getUserJourney = (req, res) => {
 
 const getPendingApprovalVars = async (req, res) => {
   try {
-    const pendingExposuresResult = await pool.query("SELECT * FROM exposures WHERE status = 'pending' OR status = 'Pending' or status='Delete-approval' or status='Delete Approval'");
+    const pendingExposuresResult = await pool.query("SELECT * FROM exposures WHERE status = 'pending' OR status = 'Pending' or status='Delete-approval' or status='Delete-Approval'");
     res.json({
       isLoadable: true,
       allExposuresTab: false,
@@ -191,22 +191,26 @@ const deleteExposure = async (req, res) => {
   }
 
   try {
+    const ids = Array.isArray(id) ? id : [id]; // Normalize to array
+
     const { rowCount } = await pool.query(
-      `UPDATE exposures 
-       SET status = 'Delete-Approval' WHERE id = $1`,
-      [id]
+      `UPDATE exposures
+       SET status = 'Delete-Approval'
+       WHERE id = ANY($1::uuid[])`,
+      [ids]
     );
 
     if (rowCount === 0) {
-      return res.status(404).json({ success: false, message: "Exposure not found" });
+      return res.status(404).json({ success: false, message: "No matching exposures found" });
     }
 
-    res.status(200).json({ success: true, message: "Exposure marked for delete approval" });
+    res.status(200).json({ success: true, message: `${rowCount} exposure(s) marked for delete approval` });
   } catch (err) {
     console.error("deleteExposure error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
+
 
 
 const approveMultipleExposures = async (req, res) => {
