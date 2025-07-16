@@ -5,9 +5,8 @@ const fs = require("fs");
 
 const exposureUploadController = require("../controllers/exposureUploadController");
 
-const upload = multer({ dest: "uploads/" }); // For file uploads
+const upload = multer({ dest: "uploads/" }); 
 
-// Routes
 router.get("/userVars", exposureUploadController.getUserVars);
 router.get("/renderVars", exposureUploadController.getRenderVars);
 router.get("/pendingrenderVars", exposureUploadController.getPendingApprovalVars);
@@ -18,11 +17,14 @@ router.post("/deleteExposure", exposureUploadController.deleteExposure);
 router.get("/netanalysis", exposureUploadController.getBuMaturityCurrencySummary);
 router.get("/top-currencies", exposureUploadController.getTopCurrencies);
 router.get("/USDsum", exposureUploadController.getPoAmountUsdSum);
-// Upload CSV Route — note the controller function used
+router.get("/payables", exposureUploadController.getPayablesByCurrency);
+router.get("/receivables", exposureUploadController.getReceivablesByCurrency);
+router.get(
+  "/getpoAmountByCurrency",
+  exposureUploadController.getAmountByCurrency
+);
+
 router.post("/upload-csv", upload.single("file"), exposureUploadController.uploadExposuresFromCSV);
 
-// Uncomment if needed
-// router.post("/approveExposure", exposureUploadController.approveExposure);
-// router.post("/rejectExposure", exposureUploadController.rejectExposure);
 
 module.exports = router;
