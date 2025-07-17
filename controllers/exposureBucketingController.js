@@ -224,7 +224,7 @@ const getupdate = async (req, res) => {
 
     const values = Object.values(updatedFields);
 
-    const query = `UPDATE exposures SET ${setClause} WHERE reference_no = $${values.length + 1} RETURNING *`;
+    const query = `UPDATE exposures SET ${setClause} WHERE id = $${values.length + 1} RETURNING *`;
     const result = await pool.query(query, [...values, id]);
 
     if (result.rowCount === 0) {
