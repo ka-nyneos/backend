@@ -164,7 +164,7 @@ const rejectMultipleExposures = async (req, res) => {
 const getRenderVars = async (req, res) => {
   try {
     const exposuresResult = await pool.query(
-      "SELECT * FROM exposures WHERE status = 'approved' OR status = 'Approved'"
+      "SELECT * FROM exposures WHERE status_bucketing = 'approved' OR status_bucketing = 'Approved'"
     );
 
     const exposureIds = exposuresResult.rows.map((row) => row.id);
