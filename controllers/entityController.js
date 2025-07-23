@@ -137,7 +137,7 @@ exports.findParentAtLevel = async (req, res) => {
 
 exports.getEntityHierarchy = async (req, res) => {
   try {
-    const entitiesResult = await pool.query("SELECT * FROM masterEntity");
+    const entitiesResult = await pool.query("SELECT * FROM masterEntity WHERE is_deleted = false");
     const entities = entitiesResult.rows;
     const relResult = await pool.query("SELECT * FROM entityRelationships");
     const relationships = relResult.rows;
