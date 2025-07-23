@@ -1,6 +1,6 @@
 const { pool } = require("../db");
 const { v4: uuidv4 } = require("uuid");
-// Create a new entity (POST /api/entity/create)
+
 exports.createEntity = async (req, res) => {
   const entity = req.body;
   try {
@@ -77,7 +77,6 @@ exports.createEntity = async (req, res) => {
   }
 };
 
-// Sync relationships (POST /api/entity/sync-relationships)
 exports.syncRelationships = async (req, res) => {
   try {
     const allEntities = await pool.query(
@@ -118,31 +117,14 @@ exports.syncRelationships = async (req, res) => {
   }
 };
 
-// Find entities at a level (GET /api/entity/findEntitiesAtLevel/:level)
-exports.findEntitiesAtLevel = async (req, res) => {
-  try {
-    const { level } = req.params;
-    const result = await pool.query(
-      "SELECT parentname FROM masterEntity WHERE level = $1",
-      [parntName]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// Find parents at level (GET /api/entity/findParentAtLevel/:level)
 exports.findParentAtLevel = async (req, res) => {
   try {
     const { level } = req.params;
-    // Remove non-numeric characters and try to extract the number
     const numericLevel = parseInt(level, 10);
     if (isNaN(numericLevel) || numericLevel <= 1) {
       return res.json([]);
     }
     const parentLevel = numericLevel - 1;
-    // Find all entities where level matches parentLevel (as string or number)
     const result = await pool.query(
       "SELECT entity_name FROM masterEntity WHERE TRIM(BOTH ' ' FROM level) = $1 OR TRIM(BOTH ' ' FROM level) = $2",
       [parentLevel.toString(), `Level ${parentLevel}`]
@@ -153,58 +135,6 @@ exports.findParentAtLevel = async (req, res) => {
   }
 };
 
-// Find children at level (GET /api/entity/findChildrenAtLevel/:level)
-exports.findChildrenAtLevel = async (req, res) => {
-  try {
-    const { level } = req.params;
-    const result = await pool.query(
-      `SELECT me.*
-       FROM masterEntity me
-       JOIN entityRelationships er ON me.entity_id = er.child_entity_id
-       WHERE me.level = $1`,
-      [level]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// Find children of an entity (GET /api/entity/findChildrenOfEntity/:id)
-exports.findChildrenOfEntity = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      `SELECT me.*
-       FROM entityRelationships er
-       JOIN masterEntity me ON er.child_entity_id = me.entity_id
-       WHERE er.parent_entity_id = $1`,
-      [id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// Find entity level (GET /api/entity/findLevel/:id)
-exports.findEntityLevel = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      "SELECT level FROM masterEntity WHERE entity_id = $1",
-      [id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Entity not found" });
-    }
-    res.json({ level: result.rows[0].level });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// Get full entity hierarchy as nested JSON (GET /api/entity/hierarchy)
 exports.getEntityHierarchy = async (req, res) => {
   try {
     const entitiesResult = await pool.query("SELECT * FROM masterEntity");
@@ -245,101 +175,71 @@ exports.getEntityHierarchy = async (req, res) => {
   }
 };
 
-// Soft delete (mark for delete approval)
 exports.deleteEntity = async (req, res) => {
   const { id } = req.params;
+  const { comments } = req.body;
   try {
     const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Delete-Approval', is_deleted = true WHERE entity_id = $1 RETURNING *`,
-      [id]
+      `UPDATE masterEntity SET approval_status = 'Delete-Approval', comments = $2 WHERE entity_id = $1 RETURNING *`,
+      [id, comments || null]
     );
     if (result.rowCount === 0)
       return res
         .status(404)
         .json({ success: false, message: "Entity not found" });
+    await pool.query(
+      `UPDATE masterEntity SET approval_status = 'Delete-Approval', comments = $2 WHERE entity_id IN (
+        SELECT child_entity_id FROM entityRelationships WHERE parent_entity_id = $1
+      )`,
+      [id, comments || null]
+    );
+
     res.json({ success: true, entity: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Approve entity
 exports.approveEntity = async (req, res) => {
   const { id } = req.params;
+  const { comments } = req.body;
   try {
-    const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Approved', is_deleted = false WHERE entity_id = $1 RETURNING *`,
+    const current = await pool.query(
+      `SELECT approval_status FROM masterEntity WHERE entity_id = $1`,
       [id]
     );
-    if (result.rowCount === 0)
+    if (current.rowCount === 0)
       return res
         .status(404)
         .json({ success: false, message: "Entity not found" });
+    const status = current.rows[0].approval_status;
+
+    let result;
+    if (status === "Delete-Approval") {
+      result = await pool.query(
+        `UPDATE masterEntity SET approval_status = 'Delete-Approved', is_deleted = true, comments = $2 WHERE entity_id = $1 RETURNING *`,
+        [id, comments || null]
+      );
+      await pool.query(
+        `UPDATE masterEntity SET approval_status = 'Delete-Approved', is_deleted = true, comments = $2 WHERE entity_id IN (
+          SELECT child_entity_id FROM entityRelationships WHERE parent_entity_id = $1
+        )`,
+        [id, "Parent Deleted"]
+      );
+    } else {
+      result = await pool.query(
+        `UPDATE masterEntity SET approval_status = 'Approved', comments = $2 WHERE entity_id = $1 RETURNING *`,
+        [id, comments || null]
+      );
+    }
     res.json({ success: true, entity: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Reject entity
-exports.rejectEntity = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Rejected', is_deleted = true WHERE entity_id = $1 RETURNING *`,
-      [id]
-    );
-    if (result.rowCount === 0)
-      return res
-        .status(404)
-        .json({ success: false, message: "Entity not found" });
-    res.json({ success: true, entity: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-// Bulk delete
-exports.deleteEntitiesBulk = async (req, res) => {
-  const { entityIds } = req.body;
-  if (!Array.isArray(entityIds) || entityIds.length === 0) {
-    return res
-      .status(400)
-      .json({ success: false, message: "entityIds array required" });
-  }
-  try {
-    const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Delete-Approval', is_deleted = true WHERE entity_id = ANY($1::text[]) RETURNING *`,
-      [entityIds]
-    );
-    res.json({ success: true, updated: result.rows });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-// Bulk approve
-exports.approveEntitiesBulk = async (req, res) => {
-  const { entityIds } = req.body;
-  if (!Array.isArray(entityIds) || entityIds.length === 0) {
-    return res
-      .status(400)
-      .json({ success: false, message: "entityIds array required" });
-  }
-  try {
-    const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Approved', is_deleted = false WHERE entity_id = ANY($1::text[]) RETURNING *`,
-      [entityIds]
-    );
-    res.json({ success: true, updated: result.rows });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-// Bulk reject
 exports.rejectEntitiesBulk = async (req, res) => {
-  const { entityIds } = req.body;
+  const { entityIds, comments } = req.body;
   if (!Array.isArray(entityIds) || entityIds.length === 0) {
     return res
       .status(400)
@@ -347,8 +247,14 @@ exports.rejectEntitiesBulk = async (req, res) => {
   }
   try {
     const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Rejected', is_deleted = true WHERE entity_id = ANY($1::text[]) RETURNING *`,
-      [entityIds]
+      `UPDATE masterEntity SET approval_status = 'Rejected', comments = $2 WHERE entity_id = ANY($1::text[]) RETURNING *`,
+      [entityIds, comments || null]
+    );
+    await pool.query(
+      `UPDATE masterEntity SET approval_status = 'Rejected', comments = $2 WHERE entity_id IN (
+        SELECT child_entity_id FROM entityRelationships WHERE parent_entity_id = ANY($1::text[])
+      )`,
+      [entityIds, "Parent Rejected"]
     );
     res.json({ success: true, updated: result.rows });
   } catch (err) {
@@ -356,7 +262,6 @@ exports.rejectEntitiesBulk = async (req, res) => {
   }
 };
 
-// Update entity by id (PATCH /api/entity/update/:id)
 exports.updateEntity = async (req, res) => {
   const { id } = req.params;
   const fields = req.body;
@@ -385,7 +290,6 @@ exports.updateEntity = async (req, res) => {
   }
 };
 
-// Get all entity names (GET /api/entity/names)
 exports.getAllEntityNames = async (req, res) => {
   try {
     const result = await pool.query("SELECT entity_name FROM masterEntity");
@@ -394,4 +298,3 @@ exports.getAllEntityNames = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
