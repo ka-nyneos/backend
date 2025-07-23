@@ -272,7 +272,7 @@ exports.updateEntity = async (req, res) => {
       .status(400)
       .json({ success: false, message: "No fields to update" });
   }
-  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
+  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ") + ", approval_status = 'Pending'";
   try {
     const result = await pool.query(
       `UPDATE masterEntity SET ${setClause} WHERE entity_id = $${
