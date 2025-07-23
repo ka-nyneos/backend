@@ -12,11 +12,11 @@ router.post("/sync-relationships", entityController.syncRelationships); // fixed
 router.get("/hierarchy", entityController.getEntityHierarchy);
 
 //
-router.post("/getRenderVars", entityController.getRenderVarsEntity);
-router.post(
-  "/getRenderVarsHierarchical",
-  entityController.getRenderVarsHierarchical
-);
+// router.post("/getRenderVars", entityController.getRenderVarsEntity);
+// router.post(
+//   "/getRenderVarsHierarchical",
+//   entityController.getRenderVarsHierarchical
+// );
 
 // Entity status update endpoints
 router.post("/delete/:id", entityController.deleteEntity);
