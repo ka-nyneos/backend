@@ -266,6 +266,7 @@ exports.updateEntity = async (req, res) => {
   const { id } = req.params;
   const fields = req.body;
   const keys = Object.keys(fields);
+  console.log("Request Body",req.body);
   if (keys.length === 0) {
     return res
       .status(400)
