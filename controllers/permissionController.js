@@ -2,6 +2,7 @@ const { pool } = require("../db");
 
 exports.upsertRolePermissions = async (req, res) => {
   const { roleName, pages } = req.body;
+  console.log("Body being sent is : ",req.body);
   if (!roleName || !pages || typeof pages !== "object") {
     return res
       .status(400)
