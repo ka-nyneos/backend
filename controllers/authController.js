@@ -59,17 +59,29 @@ WHERE u.email = $1 AND u.password = $2;
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
 module.exports.logoutUser = async (req, res) => {
   const { userId } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "User ID is required" });
+  }
 
-  console.log("Logging out userId:", userId);
-
-  globalSession.clearSession(userId); // ✅ Use the method, not direct assignment
-
-  console.log("Remaining Sessions after logout:", globalSession.UserSessions);
-
-  res.json({ success: true, message: "Logout successful" });
+  // Convert userId to number if it comes as string
+  const numericUserId = Number(userId);
+  
+  console.log("Attempting to logout user:", numericUserId);
+  console.log("Current sessions before:", globalSession.UserSessions);
+  
+  const remainingSessions = globalSession.clearSession(numericUserId);
+  
+  console.log("Remaining sessions after:", remainingSessions);
+  console.log("Internal session map:", globalSession._getSessionMap());
+  
+  res.json({ 
+    success: true, 
+    message: "Logout successful",
+    remainingSessions: remainingSessions.length
+  });
 };
 
 /*nikunj bhai  */
