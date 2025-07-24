@@ -1,32 +1,24 @@
-let UserSessions = [];
-
-const globalSession = {
-  Versions: ['0.0.6'],
-  DepVersions: ['0.0.1'],
-  WhiteLabelNames: ['Cashinvoice'],
+module.exports.logoutUser = async (req, res) => {
+  const { userId } = req.body;
   
-  get UserSessions() {
-    return UserSessions;
-  },
-  
-  addSession: (sessionData) => {
-    const existingIndex = UserSessions.findIndex(u => u.userId === sessionData.userId);
-    if (existingIndex !== -1) {
-      UserSessions[existingIndex] = sessionData;
-    } else {
-      UserSessions.push(sessionData);
-    }
-  },
-  
-  getSession: (userId) => {
-    return UserSessions.find(u => u.userId === userId);
-  },
-  
-  clearSession: (userId) => {
-    // Create a new array without the user's session
-    UserSessions = UserSessions.filter(u => u.userId !== userId);
-    return UserSessions; // Return the updated sessions for verification
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "User ID is required" });
   }
-};
 
-module.exports = globalSession;
+  // Convert userId to number if it comes as string
+  const numericUserId = Number(userId);
+  
+  console.log("Attempting to logout user:", numericUserId);
+  console.log("Current sessions before:", globalSession.UserSessions);
+  
+  const remainingSessions = globalSession.clearSession(numericUserId);
+  
+  console.log("Remaining sessions after:", remainingSessions);
+  console.log("Internal session map:", globalSession._getSessionMap());
+  
+  res.json({ 
+    success: true, 
+    message: "Logout successful",
+    remainingSessions: remainingSessions.length
+  });
+};
