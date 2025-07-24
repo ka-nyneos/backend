@@ -1,6 +1,142 @@
 const { pool } = require("../db");
 const { v4: uuidv4 } = require("uuid");
 
+exports.getRenderVarsEntity = async (req, res) => {
+  const { userId, roleName } = req.body;
+  if (!roleName) {
+    return res.status(400).json({ success: false, error: "roleName required" });
+  }
+  try {
+    const roleResult = await pool.query(
+      "SELECT id FROM roles WHERE name = $1",
+      [roleName]
+    );
+    if (roleResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Role not found" });
+    }
+    const role_id = roleResult.rows[0].id;
+    const permResult = await pool.query(
+      `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+       FROM role_permissions rp
+       JOIN permissions p ON rp.permission_id = p.id
+       WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+      [role_id]
+    );
+    const pages = {};
+    for (const row of permResult.rows) {
+      const page = row.page_name;
+      const tab = row.tab_name || "default";
+      const action = row.action;
+      const allowed = row.allowed;
+      if (!pages[page]) pages[page] = {};
+      if (action === "hasAccess" && tab === "default") {
+        pages[page].hasAccess = allowed;
+      } else {
+        if (!pages[page][tab]) pages[page][tab] = {};
+        pages[page][tab][action] = allowed;
+      }
+    }
+    for (const page of Object.keys(pages)) {
+      for (const tab of Object.keys(pages[page])) {
+        if (tab !== "hasAccess" && !("hasAccess" in pages[page][tab])) {
+          pages[page][tab].hasAccess = false;
+        }
+      }
+    }
+    res.json({
+      entity: pages["entity"] || {},
+      pageData: [],
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+exports.getRenderVarsHierarchical = async (req, res) => {
+  const { userId, roleName } = req.body;
+  if (!roleName) {
+    return res.status(400).json({ success: false, error: "roleName required" });
+  }
+  try {
+    const roleResult = await pool.query(
+      "SELECT id FROM roles WHERE name = $1",
+      [roleName]
+    );
+    if (roleResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Role not found" });
+    }
+    const role_id = roleResult.rows[0].id;
+    const permResult = await pool.query(
+      `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+       FROM role_permissions rp
+       JOIN permissions p ON rp.permission_id = p.id
+       WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+      [role_id]
+    );
+    const pages = {};
+    for (const row of permResult.rows) {
+      const page = row.page_name;
+      const tab = row.tab_name || "default";
+      const action = row.action;
+      const allowed = row.allowed;
+      if (!pages[page]) pages[page] = {};
+      if (action === "hasAccess" && tab === "default") {
+        pages[page].hasAccess = allowed;
+      } else {
+        if (!pages[page][tab]) pages[page][tab] = {};
+        pages[page][tab][action] = allowed;
+      }
+    }
+    for (const page of Object.keys(pages)) {
+      for (const tab of Object.keys(pages[page])) {
+        if (tab !== "hasAccess" && !("hasAccess" in pages[page][tab])) {
+          pages[page][tab].hasAccess = false;
+        }
+      }
+    }
+    const entitiesResult = await pool.query("SELECT * FROM masterEntity");
+    const entities = entitiesResult.rows;
+    const relResult = await pool.query("SELECT * FROM entityRelationships");
+    const relationships = relResult.rows;
+    const entityMap = {};
+    entities.forEach((e) => {
+      entityMap[e.entity_name] = {
+        id: e.entity_id,
+        name: e.entity_name,
+        data: { ...e },
+        children: [],
+      };
+    });
+    relationships.forEach((rel) => {
+      const parent = Object.values(entityMap).find(
+        (e) => e.id === rel.parent_entity_id
+      );
+      const child = Object.values(entityMap).find(
+        (e) => e.id === rel.child_entity_id
+      );
+      if (parent && child) {
+        parent.children.push(child);
+      }
+    });
+    const topLevel = entities
+      .filter(
+        (e) =>
+          e.is_top_level_entity ||
+          !relationships.some((rel) => rel.child_entity_id === e.entity_id)
+      )
+      .map((e) => entityMap[e.entity_name]);
+    res.json({
+      hierarchical: pages["hierarchical"] || {},
+      pageData: topLevel,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+
+
+
 exports.createEntity = async (req, res) => {
   const entity = req.body;
   try {
@@ -137,7 +273,7 @@ exports.findParentAtLevel = async (req, res) => {
 
 exports.getEntityHierarchy = async (req, res) => {
   try {
-    const entitiesResult = await pool.query("SELECT * FROM masterEntity WHERE is_deleted = false");
+    const entitiesResult = await pool.query("SELECT * FROM masterEntity");
     const entities = entitiesResult.rows;
     const relResult = await pool.query("SELECT * FROM entityRelationships");
     const relationships = relResult.rows;
@@ -179,22 +315,44 @@ exports.deleteEntity = async (req, res) => {
   const { id } = req.params;
   const { comments } = req.body;
   try {
+    // Optimized: fetch all relationships once
+    const relResult = await pool.query(
+      "SELECT parent_entity_id, child_entity_id FROM entityRelationships"
+    );
+    const rels = relResult.rows;
+    // Build parent-to-children map
+    const parentMap = {};
+    rels.forEach((rel) => {
+      if (!parentMap[rel.parent_entity_id])
+        parentMap[rel.parent_entity_id] = [];
+      parentMap[rel.parent_entity_id].push(rel.child_entity_id);
+    });
+    // Traverse to get all descendants
+    function getAllDescendants(ids) {
+      const all = new Set(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift();
+        const children = parentMap[current] || [];
+        for (const child of children) {
+          if (!all.has(child)) {
+            all.add(child);
+            queue.push(child);
+          }
+        }
+      }
+      return Array.from(all);
+    }
+    const allToDelete = getAllDescendants([id]);
     const result = await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Delete-Approval', comments = $2 WHERE entity_id = $1 RETURNING *`,
-      [id, comments || null]
+      `UPDATE masterEntity SET approval_status = 'Delete-Approval', comments = $2 WHERE entity_id = ANY($1::text[]) RETURNING *`,
+      [allToDelete, comments || null]
     );
     if (result.rowCount === 0)
       return res
         .status(404)
         .json({ success: false, message: "Entity not found" });
-    await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Delete-Approval', comments = $2 WHERE entity_id IN (
-        SELECT child_entity_id FROM entityRelationships WHERE parent_entity_id = $1
-      )`,
-      [id, comments || null]
-    );
-
-    res.json({ success: true, entity: result.rows[0] });
+    res.json({ success: true, updated: result.rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -246,15 +404,38 @@ exports.rejectEntitiesBulk = async (req, res) => {
       .json({ success: false, message: "entityIds array required" });
   }
   try {
+    // Optimized: fetch all relationships once
+    const relResult = await pool.query(
+      "SELECT parent_entity_id, child_entity_id FROM entityRelationships"
+    );
+    const rels = relResult.rows;
+    // Build parent-to-children map
+    const parentMap = {};
+    rels.forEach((rel) => {
+      if (!parentMap[rel.parent_entity_id])
+        parentMap[rel.parent_entity_id] = [];
+      parentMap[rel.parent_entity_id].push(rel.child_entity_id);
+    });
+    // Traverse to get all descendants
+    function getAllDescendants(ids) {
+      const all = new Set(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift();
+        const children = parentMap[current] || [];
+        for (const child of children) {
+          if (!all.has(child)) {
+            all.add(child);
+            queue.push(child);
+          }
+        }
+      }
+      return Array.from(all);
+    }
+    const allToReject = getAllDescendants(entityIds);
     const result = await pool.query(
       `UPDATE masterEntity SET approval_status = 'Rejected', comments = $2 WHERE entity_id = ANY($1::text[]) RETURNING *`,
-      [entityIds, comments || null]
-    );
-    await pool.query(
-      `UPDATE masterEntity SET approval_status = 'Rejected', comments = $2 WHERE entity_id IN (
-        SELECT child_entity_id FROM entityRelationships WHERE parent_entity_id = ANY($1::text[])
-      )`,
-      [entityIds, "Parent Rejected"]
+      [allToReject, comments || null]
     );
     res.json({ success: true, updated: result.rows });
   } catch (err) {
@@ -271,7 +452,10 @@ exports.updateEntity = async (req, res) => {
       .status(400)
       .json({ success: false, message: "No fields to update" });
   }
-  const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ") + ", approval_status = 'Pending'";
+  // Always set approval_status to 'Pending' on update
+  const setClause =
+    keys.map((k, i) => `${k} = $${i + 1}`).join(", ") +
+    ", approval_status = 'Pending'";
   try {
     const result = await pool.query(
       `UPDATE masterEntity SET ${setClause} WHERE entity_id = $${
