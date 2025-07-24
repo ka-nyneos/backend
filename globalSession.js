@@ -1,24 +1,29 @@
-module.exports.logoutUser = async (req, res) => {
-  const { userId } = req.body;
-  
-  if (!userId) {
-    return res.status(400).json({ success: false, message: "User ID is required" });
-  }
+const sessions = new Map(); // Using Map instead of array for better performance
 
-  // Convert userId to number if it comes as string
-  const numericUserId = Number(userId);
+const globalSession = {
+  Versions: ['0.0.6'],
+  DepVersions: ['0.0.1'],
+  WhiteLabelNames: ['Cashinvoice'],
   
-  console.log("Attempting to logout user:", numericUserId);
-  console.log("Current sessions before:", globalSession.UserSessions);
+  get UserSessions() {
+    return Array.from(sessions.values());
+  },
   
-  const remainingSessions = globalSession.clearSession(numericUserId);
+  addSession: (sessionData) => {
+    sessions.set(sessionData.userId, sessionData);
+  },
   
-  console.log("Remaining sessions after:", remainingSessions);
-  console.log("Internal session map:", globalSession._getSessionMap());
+  getSession: (userId) => {
+    return sessions.get(userId);
+  },
   
-  res.json({ 
-    success: true, 
-    message: "Logout successful",
-    remainingSessions: remainingSessions.length
-  });
+  clearSession: (userId) => {
+    sessions.delete(userId);
+    return this.UserSessions; // Return remaining sessions
+  },
+  
+  // For debugging
+  _getSessionMap: () => sessions
 };
+
+module.exports = globalSession;
