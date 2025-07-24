@@ -72,6 +72,7 @@ const approveBucketing = async (req, res) => {
     const toApprove = existingExposures
       .filter(row => row.status_bucketing  !== "Delete-Approval")
       .map(row => row.id);
+    console.log("toApprove:", toApprove);
 
     const results = {
       deleted: [],
