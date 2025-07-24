@@ -49,9 +49,55 @@ const getUserVars = async (req, res) => {
   }
 };
 
-
 const getHedgingProposalsAggregated = async (req, res) => {
   try {
+    // 1. Get current user session
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+
+    // 2. Get user's business unit name
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+
+    // 3. Find all descendant business units using recursive CTE
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(`
+      WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants
+    `, [rootEntityId]);
+    const buNames = descendantsResult.rows.map(r => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // 4. Aggregate exposures for allowed business units and approved status_bucketing
     const query = `
       SELECT 
         business_unit, 
@@ -70,15 +116,15 @@ const getHedgingProposalsAggregated = async (req, res) => {
         SUM(COALESCE(old_month4, 0)) AS old_hedge_month4,
         SUM(COALESCE(old_month4to6, 0)) AS old_hedge_month4to6,
         SUM(COALESCE(old_month6plus, 0)) AS old_hedge_month6plus
-      FROM exposures where (status_bucketing = 'Apporved' or status_bucketing = 'approved')
-      GROUP BY business_unit, po_currency, type
+      FROM exposures 
+      WHERE (status_bucketing = 'Approved' OR status_bucketing = 'approved')
+        AND business_unit = ANY($1)
+      GROUP BY business_unit, po_currency, type 
     `;
-
-    const result = await pool.query(query);
+    const result = await pool.query(query, [buNames]);
 
     const proposals = result.rows.map((row) => ({
-      id: row.contributing_ids[0], // Pick first one if needed, or:
-    //   reference_ids: row.contributing_ids, // all source exposure UUIDs
+      id: row.contributing_ids[0],
       business_unit: row.business_unit,
       po_currency: row.po_currency,
       type: row.type,
@@ -104,7 +150,6 @@ const getHedgingProposalsAggregated = async (req, res) => {
     res.status(500).json({ error: "Failed to aggregate proposals" });
   }
 };
-
 
 module.exports = {
   getUserVars,
