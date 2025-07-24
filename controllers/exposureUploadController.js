@@ -549,6 +549,126 @@ const getAmountByCurrency = async (req, res) => {
   }
 };
 
+const getBusinessUnitCurrencySummary = async (req, res) => {
+  // Exchange rates to USD
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT business_unit, po_currency, po_amount FROM exposures"
+    );
+    // Aggregate by business_unit and currency
+    const buMap = {};
+    for (const row of result.rows) {
+      const bu = row.business_unit || "Unknown";
+      const currency = (row.po_currency || "Unknown").toUpperCase();
+      const amount = Number(row.po_amount) || 0;
+      const usdAmount = amount * (rates[currency] || 1.0);
+      if (!buMap[bu]) buMap[bu] = {};
+      if (!buMap[bu][currency]) buMap[bu][currency] = 0;
+      buMap[bu][currency] += usdAmount;
+    }
+    // Format output
+    const output = Object.entries(buMap).map(([bu, currencies]) => {
+      const total = Object.values(currencies).reduce((a, b) => a + b, 0);
+      return {
+        name: bu,
+        total: `$${(total / 1000).toFixed(1)}K`,
+        currencies: Object.entries(currencies).map(([code, amount]) => ({
+          code,
+          amount: `$${(amount / 1000).toFixed(1)}K`,
+        })),
+      };
+    });
+    res.json(output);
+  } catch (err) {
+    console.error("Error fetching business unit currency summary:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch business unit currency summary" });
+  }
+};
+
+const getMaturityExpirySummary = async (req, res) => {
+  // Exchange rates to USD
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT po_amount, po_currency, maturity_expiry_date FROM exposures WHERE maturity_expiry_date IS NOT NULL"
+    );
+    const now = new Date();
+    let sum7 = 0,
+      sum30 = 0,
+      sumTotal = 0;
+    for (const row of result.rows) {
+      const amount = Number(row.po_amount) || 0;
+      const currency = (row.po_currency || "USD").toUpperCase();
+      const rate = rates[currency] || 1.0;
+      const usdAmount = amount * rate;
+      const maturityDate = new Date(row.maturity_expiry_date);
+      if (isNaN(maturityDate.getTime())) continue;
+      const diffDays = Math.ceil((maturityDate - now) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0) {
+        sumTotal += usdAmount;
+        if (diffDays <= 7) sum7 += usdAmount;
+        if (diffDays <= 30) sum30 += usdAmount;
+      }
+    }
+    const output = [
+      { label: "Next 7 Days", value: `$${(sum7 / 1000).toFixed(1)}K` },
+      { label: "Next 30 Days", value: `$${(sum30 / 1000).toFixed(1)}K` },
+      { label: "Total Upcoming", value: `$${(sumTotal / 1000).toFixed(1)}K` },
+    ];
+    res.json(output);
+  } catch (err) {
+    console.error("Error fetching maturity expiry summary:", err);
+    res.status(500).json({ error: "Failed to fetch maturity expiry summary" });
+  }
+};
+const getMaturityExpiryCount7Days = async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT maturity_expiry_date FROM exposures WHERE maturity_expiry_date IS NOT NULL"
+    );
+    const now = new Date();
+    let count7 = 0;
+    for (const row of result.rows) {
+      const maturityDate = new Date(row.maturity_expiry_date);
+      if (isNaN(maturityDate.getTime())) continue;
+      const diffDays = Math.ceil((maturityDate - now) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0 && diffDays <= 7) {
+        count7++;
+      }
+    }
+    res.json({ value: count7 });
+  } catch (err) {
+    console.error("Error fetching maturity expiry count for 7 days:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch maturity expiry count for 7 days" });
+  }
+};
 module.exports = {
   getUserVars,
   getRenderVars,
@@ -563,6 +683,9 @@ module.exports = {
   getPoAmountUsdSum,
   getAmountByCurrency,
   getReceivablesByCurrency,
-  getPayablesByCurrency
+  getPayablesByCurrency,
+  getBusinessUnitCurrencySummary,
+  getMaturityExpirySummary,
+  getMaturityExpiryCount7Days,
   
 };
