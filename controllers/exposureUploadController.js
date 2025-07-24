@@ -53,14 +53,69 @@ const getUserVars = async (req, res) => {
 
 const getRenderVars = async (req, res) => {
   try {
-    const exposuresResult = await pool.query("SELECT * FROM exposures");
+    // 1. Get current user session
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+
+    // 2. Get user's business unit name
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+
+    // 3. Find all descendant business units using recursive CTE
+    // First, get the entity_id for the user's business unit
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+
+    // Recursive CTE to get all descendant entity_ids
+    const descendantsResult = await pool.query(`
+      WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants
+    `, [rootEntityId]);
+
+    const buNames = descendantsResult.rows.map(r => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // 4. Filter exposures by business_unit in buNames
+    const exposuresResult = await pool.query(
+      `SELECT * FROM exposures WHERE business_unit = ANY($1)`,
+      [buNames]
+    );
+
     res.json({
       isLoadable: true,
       allExposuresTab: false,
       pendingApprovalTab: true,
       uploadingTab: false,
       btnApprove: false,
-      buAccessible: ["Finance", "Sales"],
+      buAccessible: buNames,
       pageData: exposuresResult.rows,
     });
   } catch (err) {
@@ -77,17 +132,69 @@ const getUserJourney = (req, res) => {
   });
 };
 
-
 const getPendingApprovalVars = async (req, res) => {
   try {
-    const pendingExposuresResult = await pool.query("SELECT * FROM exposures WHERE status = 'pending' OR status = 'Pending' or status='Delete-approval' or status='Delete-Approval'");
+    // 1. Get current user session
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+
+    // 2. Get user's business unit name
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+
+    // 3. Find all descendant business units using recursive CTE
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+
+    const descendantsResult = await pool.query(`
+      WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants
+    `, [rootEntityId]);
+
+    const buNames = descendantsResult.rows.map(r => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // 4. Filter exposures by business_unit in buNames and pending status
+    const pendingExposuresResult = await pool.query(
+      `SELECT * FROM exposures WHERE (status = 'pending' OR status = 'Pending' OR status = 'Delete-approval' OR status = 'Delete-Approval') AND business_unit = ANY($1)`,
+      [buNames]
+    );
+
     res.json({
       isLoadable: true,
       allExposuresTab: false,
       pendingApprovalTab: true,
       uploadingTab: false,
       btnApprove: true,
-      buAccessible: ["Finance", "Sales"],
+      buAccessible: buNames,
       pageData: pendingExposuresResult.rows,
     });
   } catch (err) {
@@ -96,82 +203,161 @@ const getPendingApprovalVars = async (req, res) => {
   }
 };
 
-
 const exposuresColumns = [
-  "reference_no", "type", "business_unit", "vendor_beneficiary", "po_amount", "po_currency", "maturity_expiry_date",
-  "linked_id", "status", "file_reference_id", "upload_date", "purchase_invoice", "po_date", "shipping_bill_date",
-  "supplier_name", "expected_payment_date", "comments", "created_at", "updated_at", "uploaded_by", "po_detail", "inco",
-  "advance", "month1", "month2", "month3", "month4", "month4to6", "month6plus", "old_month1", "old_month2", "old_month3",
-  "old_month4", "old_month4to6", "old_month6plus", "hedge_month1", "hedge_month2", "hedge_month3", "hedge_month4",
-  "hedge_month4to6", "hedge_month6plus", "old_hedge_month1", "old_hedge_month2", "old_hedge_month3", "old_hedge_month4",
-  "old_hedge_month4to6", "old_hedge_month6plus", "status_hedge"
+  "reference_no",
+  "type",
+  "business_unit",
+  "vendor_beneficiary",
+  "po_amount",
+  "po_currency",
+  "maturity_expiry_date",
+  "linked_id",
+  "status",
+  "file_reference_id",
+  "upload_date",
+  "purchase_invoice",
+  "po_date",
+  "shipping_bill_date",
+  "supplier_name",
+  "expected_payment_date",
+  "comments",
+  "created_at",
+  "updated_at",
+  "uploaded_by",
+  "po_detail",
+  "inco",
+  "advance",
+  "month1",
+  "month2",
+  "month3",
+  "month4",
+  "month4to6",
+  "month6plus",
+  "old_month1",
+  "old_month2",
+  "old_month3",
+  "old_month4",
+  "old_month4to6",
+  "old_month6plus",
+  "hedge_month1",
+  "hedge_month2",
+  "hedge_month3",
+  "hedge_month4",
+  "hedge_month4to6",
+  "hedge_month6plus",
+  "old_hedge_month1",
+  "old_hedge_month2",
+  "old_hedge_month3",
+  "old_hedge_month4",
+  "old_hedge_month4to6",
+  "old_hedge_month6plus",
+  "status_hedge",
 ];
-
 
 const uploadExposuresFromCSV = async (req, res) => {
   const filePath = path.join(__dirname, "../", req.file.path);
   const rows = [];
+  // 1. Get current user session and allowed business units
+  const session = globalSession.UserSessions[0];
+  if (!session) {
+    return res.status(404).json({ error: "No active session found" });
+  }
+  const userId = session.userId;
+  // Get user's business unit name
+  let buNames = [];
+  try {
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+    // Find all descendant business units using recursive CTE
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(`
+      WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants
+    `, [rootEntityId]);
+    buNames = descendantsResult.rows.map(r => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+  } catch (err) {
+    console.error("Error fetching allowed business units:", err);
+    return res.status(500).json({ error: "Failed to fetch allowed business units" });
+  }
 
   fs.createReadStream(filePath)
     .pipe(csv())
     .on("data", (row) => {
-  const cleanedRow = {};
-
-  for (let key in row) {
-    const normalizedKey = key.trim().toLowerCase();
-
-    // Include only valid columns
-    if (exposuresColumns.includes(normalizedKey)) {
-      let value = row[key]?.trim() || null;
-
-      if (value === "") value = null;
-
-      // Handle integer columns
-      if (
-        /^month|amount|advance/.test(normalizedKey) &&
-        value !== null
-      ) {
-        value = parseInt(value);
-        if (isNaN(value)) value = null;
+      const cleanedRow = {};
+      for (let key in row) {
+        const normalizedKey = key.trim().toLowerCase();
+        if (exposuresColumns.includes(normalizedKey)) {
+          let value = row[key]?.trim() || null;
+          if (value === "") value = null;
+          if (/^month|amount|advance/.test(normalizedKey) && value !== null) {
+            value = parseInt(value);
+            if (isNaN(value)) value = null;
+          }
+          if (/date/.test(normalizedKey) && value !== null) {
+            const dateObj = new Date(value);
+            value = isNaN(dateObj.getTime())
+              ? null
+              : dateObj.toISOString().slice(0, 10);
+          }
+          cleanedRow[normalizedKey] = value;
+        }
       }
-
-      // Handle date fields
-      if (/date/.test(normalizedKey) && value !== null) {
-        const dateObj = new Date(value);
-        value = isNaN(dateObj.getTime())
-          ? null
-          : dateObj.toISOString().slice(0, 10);
-      }
-
-      cleanedRow[normalizedKey] = value;
-    }
-  }
-
-  // Force status to "Pending"
-  cleanedRow["status"] = "Pending";
-
-  rows.push(cleanedRow);
-}).on("end", async () => {
+      cleanedRow["status"] = "Pending";
+      rows.push(cleanedRow);
+    })
+    .on("end", async () => {
       try {
+        // Validate all rows' business_unit
+        const invalidRows = rows.filter(row => !buNames.includes(row["business_unit"]))
+          .map(row => row["reference_no"] || "(no reference_no)");
+        if (invalidRows.length > 0) {
+          fs.unlinkSync(filePath);
+          return res.status(400).json({
+            error: "Some rows have business_unit not allowed for this user.",
+            invalidReferenceNos: invalidRows
+          });
+        }
+        // All rows valid, insert all
         for (let row of rows) {
           const keys = Object.keys(row);
-
-          // Skip rows with no valid data
           if (keys.length === 0) continue;
-
           const values = keys.map((k) => row[k]);
           const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
-
           const query = `
             INSERT INTO exposures (${keys.join(", ")})
             VALUES (${placeholders})
           `;
-
           await pool.query(query, values);
         }
-
         fs.unlinkSync(filePath);
-        res.status(200).json({ message: "Partial rows inserted successfully." });
+        res.status(200).json({ message: "All rows inserted successfully." });
       } catch (err) {
         console.error("DB Insert Error:", err);
         res.status(500).json({ error: "Failed to insert data." });
@@ -187,7 +373,9 @@ const deleteExposure = async (req, res) => {
   const { id, requested_by, delete_comment } = req.body;
 
   if (!id || !requested_by) {
-    return res.status(400).json({ success: false, message: "id and requested_by are required" });
+    return res
+      .status(400)
+      .json({ success: false, message: "id and requested_by are required" });
   }
 
   try {
@@ -201,23 +389,33 @@ const deleteExposure = async (req, res) => {
     );
 
     if (rowCount === 0) {
-      return res.status(404).json({ success: false, message: "No matching exposures found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "No matching exposures found" });
     }
 
-    res.status(200).json({ success: true, message: `${rowCount} exposure(s) marked for delete approval` });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: `${rowCount} exposure(s) marked for delete approval`,
+      });
   } catch (err) {
     console.error("deleteExposure error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
-
-
 const approveMultipleExposures = async (req, res) => {
   const { exposureIds, approved_by, approval_comment } = req.body;
 
   if (!Array.isArray(exposureIds) || exposureIds.length === 0 || !approved_by) {
-    return res.status(400).json({ success: false, message: "exposureIds and approved_by are required" });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "exposureIds and approved_by are required",
+      });
   }
 
   try {
@@ -228,12 +426,12 @@ const approveMultipleExposures = async (req, res) => {
     );
 
     const toDelete = existingExposures
-      .filter(row => row.status === "Delete-Approval")
-      .map(row => row.id);
+      .filter((row) => row.status === "Delete-Approval")
+      .map((row) => row.id);
 
     const toApprove = existingExposures
-      .filter(row => row.status !== "Delete-Approval")
-      .map(row => row.id);
+      .filter((row) => row.status !== "Delete-Approval")
+      .map((row) => row.id);
 
     const results = {
       deleted: [],
@@ -256,7 +454,7 @@ const approveMultipleExposures = async (req, res) => {
          SET status = 'Approved'
          WHERE id = ANY($1::uuid[])
          RETURNING *`,
-        [ toApprove]
+        [toApprove]
       );
       results.approved = approved.rows;
     }
@@ -272,7 +470,12 @@ const rejectMultipleExposures = async (req, res) => {
   const { exposureIds, rejected_by, rejection_comment } = req.body;
 
   if (!Array.isArray(exposureIds) || exposureIds.length === 0 || !rejected_by) {
-    return res.status(400).json({ success: false, message: "exposureIds and rejected_by are required" });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "exposureIds and rejected_by are required",
+      });
   }
 
   try {
@@ -290,7 +493,6 @@ const rejectMultipleExposures = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
-
 
 const getBuMaturityCurrencySummary = async (req, res) => {
   try {
@@ -379,10 +581,12 @@ const getTopCurrencies = async (req, res) => {
     INR: 0.0117,
   };
   try {
-    const result = await pool.query("SELECT po_amount, po_currency FROM exposures");
+    const result = await pool.query(
+      "SELECT po_amount, po_currency FROM exposures"
+    );
     const currencyTotals = {};
     for (const row of result.rows) {
-      const currency = (row.po_currency || '').toUpperCase();
+      const currency = (row.po_currency || "").toUpperCase();
       const amount = Number(row.po_amount) || 0;
       const usdValue = amount * (rates[currency] || 1.0);
       currencyTotals[currency] = (currencyTotals[currency] || 0) + usdValue;
@@ -392,7 +596,16 @@ const getTopCurrencies = async (req, res) => {
     const topCurrencies = sorted.slice(0, 5).map(([currency, value], idx) => ({
       currency,
       value: Number(value.toFixed(1)),
-      color: idx === 0 ? "bg-green-400" : idx === 1 ? "bg-blue-400" : idx === 2 ? "bg-yellow-400" : idx === 3 ? "bg-red-400" : "bg-purple-400",
+      color:
+        idx === 0
+          ? "bg-green-400"
+          : idx === 1
+          ? "bg-blue-400"
+          : idx === 2
+          ? "bg-yellow-400"
+          : idx === 3
+          ? "bg-red-400"
+          : "bg-purple-400",
     }));
     res.json(topCurrencies);
   } catch (err) {
@@ -400,7 +613,6 @@ const getTopCurrencies = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch top currencies" });
   }
 };
-
 
 const getPoAmountUsdSum = async (req, res) => {
   // Exchange rates to USD
@@ -462,7 +674,7 @@ const getPayablesByCurrency = async (req, res) => {
     const payablesData = Object.entries(currencyTotals).map(
       ([currency, amount]) => ({
         currency,
-        amount: `$${(amount/1000).toFixed(1)}K`,
+        amount: `$${(amount / 1000).toFixed(1)}K`,
       })
     );
     res.json(payablesData);
@@ -500,7 +712,7 @@ const getReceivablesByCurrency = async (req, res) => {
     const receivablesData = Object.entries(currencyTotals).map(
       ([currency, amount]) => ({
         currency,
-        amount: `$${(amount/1000).toFixed(1)}K`,
+        amount: `$${(amount / 1000).toFixed(1)}K`,
       })
     );
     res.json(receivablesData);
@@ -536,11 +748,11 @@ const getAmountByCurrency = async (req, res) => {
         (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
     }
     const payablesData = Object.entries(currencyTotals).map(
-  ([currency, amount]) => ({
-    currency,
-    amount: `$${(amount / 1000).toFixed(1)}K`,
-  })
-);
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${(amount / 1000).toFixed(1)}K`,
+      })
+    );
 
     res.json(payablesData);
   } catch (err) {
@@ -669,6 +881,7 @@ const getMaturityExpiryCount7Days = async (req, res) => {
       .json({ error: "Failed to fetch maturity expiry count for 7 days" });
   }
 };
+
 module.exports = {
   getUserVars,
   getRenderVars,
@@ -687,5 +900,4 @@ module.exports = {
   getBusinessUnitCurrencySummary,
   getMaturityExpirySummary,
   getMaturityExpiryCount7Days,
-  
 };
