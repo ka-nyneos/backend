@@ -24,6 +24,21 @@ router.get(
   exposureUploadController.getAmountByCurrency
 );
 
+router.get(
+  "/buintexp",
+  exposureUploadController.getBusinessUnitCurrencySummary
+);
+
+router.get(
+  "/matexpirysummary",
+  exposureUploadController.getMaturityExpirySummary
+);
+
+router.get(
+  "/matexpirycount7days",
+  exposureUploadController.getMaturityExpiryCount7Days
+);
+
 router.post("/upload-csv", upload.single("file"), exposureUploadController.uploadExposuresFromCSV);
 
 
