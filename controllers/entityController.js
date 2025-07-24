@@ -476,7 +476,9 @@ exports.updateEntity = async (req, res) => {
 
 exports.getAllEntityNames = async (req, res) => {
   try {
-    const result = await pool.query("SELECT entity_name FROM masterEntity");
+    const result = await pool.query(
+      "SELECT entity_name FROM masterEntity WHERE (approval_status = 'Approved' OR approval_status = 'approved') AND is_deleted = false"
+    );
     res.json(result.rows.map((row) => row.entity_name));
   } catch (err) {
     res.status(500).json({ error: err.message });
