@@ -9,21 +9,22 @@ const globalSession = {
     return Array.from(sessions.values());
   },
   
-  addSession: (sessionData) => {
+  addSession(sessionData) {
     sessions.set(sessionData.userId, sessionData);
   },
   
-  getSession: (userId) => {
+  getSession(userId) {
     return sessions.get(userId);
   },
   
-  clearSession: (userId) => {
+  clearSession(userId) {
     sessions.delete(userId);
-    return this.UserSessions; // Return remaining sessions
+    return this.UserSessions;
   },
   
-  // For debugging
-  _getSessionMap: () => sessions
+  _getSessionMap() {
+    return sessions;
+  }
 };
 
 module.exports = globalSession;
