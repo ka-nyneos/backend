@@ -62,24 +62,16 @@ WHERE u.email = $1 AND u.password = $2;
 
 module.exports.logoutUser = async (req, res) => {
   const { userId } = req.body;
-  
-  if (!userId) {
-    return res.status(400).json({ success: false, message: "User ID is required" });
-  }
 
-  console.log("Sessions before logout:", globalSession.UserSessions);
-  
-  // Use the clearSession method
-  const updatedSessions = globalSession.clearSession(userId);
-  
-  console.log("Sessions after logout:", updatedSessions);
-  
-  res.json({ 
-    success: true, 
-    message: "Logout successful",
-    remainingSessions: updatedSessions.length // For debugging
-  });
+  console.log("Logging out userId:", userId);
+
+  globalSession.clearSession(userId); // ✅ Use the method, not direct assignment
+
+  console.log("Remaining Sessions after logout:", globalSession.UserSessions);
+
+  res.json({ success: true, message: "Logout successful" });
 };
+
 /*nikunj bhai  */
 exports.getSidebarPermissions = async (req, res) => {
   const session = globalSession.UserSessions.find(
