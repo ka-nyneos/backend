@@ -62,9 +62,12 @@ WHERE u.email = $1 AND u.password = $2;
 
 module.exports.logoutUser = async (req, res) => {
   const { userId } = req.body;
-  globalSession.UserSessions = globalSession.UserSessions.filter(
-    (u) => u.userId !== userId
-  );
+  
+  // Use the clearSession method instead of direct assignment
+  globalSession.clearSession(userId);
+  
+  console.log("Current sessions after logout:", globalSession.UserSessions);
+  
   res.json({ success: true, message: "Logout successful" });
 };
 /*nikunj bhai  */
