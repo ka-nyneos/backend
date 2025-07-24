@@ -1,4 +1,3 @@
-// globalSession.js
 let UserSessions = [];
 
 const globalSession = {
@@ -8,6 +7,10 @@ const globalSession = {
   
   get UserSessions() {
     return UserSessions;
+  },
+  
+  set UserSessions(sessions) {
+    UserSessions = sessions;
   },
   
   addSession: (sessionData) => {
@@ -28,4 +31,4 @@ const globalSession = {
   }
 };
 
-module.exports = globalSession; // Changed from module.exports.globalSession
+module.exports = globalSession;
