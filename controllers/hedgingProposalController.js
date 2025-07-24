@@ -70,7 +70,7 @@ const getHedgingProposalsAggregated = async (req, res) => {
         SUM(COALESCE(old_month4, 0)) AS old_hedge_month4,
         SUM(COALESCE(old_month4to6, 0)) AS old_hedge_month4to6,
         SUM(COALESCE(old_month6plus, 0)) AS old_hedge_month6plus
-      FROM exposures
+      FROM exposures where (status_bucketing = 'Apporved' or status_bucketing = 'approved')
       GROUP BY business_unit, po_currency, type
     `;
 
