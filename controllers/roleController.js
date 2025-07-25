@@ -141,95 +141,45 @@ exports.rejectRole = async (req, res) => {
   }
 };
 
-// exports.getRolesPageData = async (req, res) => {
-//   // Get user session from globalSession using email from req.body (or req.user if using auth middleware)
-//   const session = globalSession.UserSessions.find(
-//     (s) => s.email === req.params.email
-//   );
-//   const userId = session ? session.userId : null;
-//   if (!userId) {
-//     return res.status(401).json({ message: "User not logged in" });
-//   }
-
-//   // Query all permissions for this user for the 'roles' page
-//   try {
-//     const permResult = await pool.query(
-//       `SELECT p.page_name, p.tab_name, p.action, rp.allowed
-//        FROM user_roles ur
-//        JOIN roles r ON ur.role_id = r.id
-//        JOIN role_permissions rp ON r.id = rp.role_id
-//        JOIN permissions p ON rp.permission_id = p.id
-//        WHERE ur.user_id = $1 AND p.page_name = 'roles'`,
-//       [userId]
-//     );
-
-//     // Helper to build tab permissions
-//     function buildTab(tabName) {
-//       const actions = [
-//         "hasAccess",
-//         "showCreateButton",
-//         "showEditButton",
-//         "showDeleteButton",
-//         "showApproveButton",
-//         "showRejectButton",
-//         "canView",
-//         "canUpload",
-//       ];
-//       const tabPerms = {};
-//       for (const action of actions) {
-//         tabPerms[action] = permResult.rows.some(
-//           (row) =>
-//             row.tab_name === tabName &&
-//             row.action === action &&
-//             row.allowed === true
-//         );
-//       }
-//       return tabPerms;
-//     }
-
-//     const rolesPerm = {
-//       hasAccess: permResult.rows.some(
-//         (row) =>
-//           row.tab_name === "allTab" &&
-//           row.action === "hasAccess" &&
-//           row.allowed === true
-//       ),
-//       allTab: buildTab("allTab"),
-//       uploadTab: buildTab("uploadTab"),
-//       pendingTab: buildTab("pendingTab"),
-//     };
-
-//     // ...existing code for roleData...
-//     const result = await pool.query("SELECT * FROM roles");
-//     const roleData = result.rows.map((r) => ({
-//       id: r.id,
-//       name: r.name,
-//       role_code: r.role_code || "",
-//       description: r.description,
-//       startTime: r.office_start_time_ist || r.start_time || "",
-//       endTime: r.office_end_time_ist || r.end_time || "",
-//       createdAt: r.created_at ? r.created_at.toISOString() : "",
-//       status: r.status || "",
-//       createdBy: r.created_by || "",
-//       approvedBy: r.approved_by || null,
-//       approveddate: r.approved_at ? r.approved_at.toISOString() : null,
-//     }));
-//     return res.json({ roles: rolesPerm, roleData });
-//   } catch (err) {
-//     res.status(500).json({ success: false, error: err.message });
-//   }
-// };
 exports.getRolesPageData = async (req, res) => {
-  // Example: permissions could be based on user role, here hardcoded for demo
-  const permissions = {
-    showCreateButton: true,
-    showEditButton: true,
-    showDeleteButton: false,
-    showApproveButton: true,
-    showRejectButton: false,
-    canLoad: true,
-  };
-
+  // Get roleName from session
+  const session = globalSession.UserSessions[0];
+  if (!session) {
+    return res.status(404).json({ error: "No active session found" });
+  }
+  const roleName = session.role;
+  let rolesPerms = {};
+  if (roleName) {
+    const roleResult = await pool.query(
+      "SELECT id FROM roles WHERE name = $1",
+      [roleName]
+    );
+    if (roleResult.rows.length > 0) {
+      const role_id = roleResult.rows[0].id;
+      const permResult = await pool.query(
+        `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+         FROM role_permissions rp
+         JOIN permissions p ON rp.permission_id = p.id
+         WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+        [role_id]
+      );
+      // Build permissions structure for 'roles'
+      for (const row of permResult.rows) {
+        if (row.page_name !== "roles") continue;
+        const tab = row.tab_name;
+        const action = row.action;
+        const allowed = row.allowed;
+        if (!rolesPerms.pagePermissions) rolesPerms.pagePermissions = {};
+        if (!rolesPerms.tabs) rolesPerms.tabs = {};
+        if (tab === null) {
+          rolesPerms.pagePermissions[action] = allowed;
+        } else {
+          if (!rolesPerms.tabs[tab]) rolesPerms.tabs[tab] = {};
+          rolesPerms.tabs[tab][action] = allowed;
+        }
+      }
+    }
+  }
   try {
     const result = await pool.query("SELECT * FROM roles");
     const roleData = result.rows.map((r) => ({
@@ -245,7 +195,7 @@ exports.getRolesPageData = async (req, res) => {
       approvedBy: r.approved_by || null,
       approveddate: r.approved_at ? r.approved_at.toISOString() : null,
     }));
-    res.json({ ...permissions, roleData });
+    res.json({ permissions: rolesPerms, roleData });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -285,22 +235,49 @@ exports.getJustRoles = async (req, res) => {
   }
 };
 exports.getPendingRoles = async (req, res) => {
-  // Example: permissions could be based on user role, here hardcoded for demo
-  const permissions = {
-    showCreateButton: true,
-    showEditButton: true,
-    showDeleteButton: false,
-    showApproveButton: true,
-    showRejectButton: false,
-    canLoad: true,
-  };
-
+  // Get roleName from session
+  const session = globalSession.UserSessions[0];
+  if (!session) {
+    return res.status(404).json({ error: "No active session found" });
+  }
+  const roleName = session.role;
+  let rolesPerms = {};
+  if (roleName) {
+    const roleResult = await pool.query(
+      "SELECT id FROM roles WHERE name = $1",
+      [roleName]
+    );
+    if (roleResult.rows.length > 0) {
+      const role_id = roleResult.rows[0].id;
+      const permResult = await pool.query(
+        `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+         FROM role_permissions rp
+         JOIN permissions p ON rp.permission_id = p.id
+         WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+        [role_id]
+      );
+      // Build permissions structure for 'roles'
+      for (const row of permResult.rows) {
+        if (row.page_name !== "roles") continue;
+        const tab = row.tab_name;
+        const action = row.action;
+        const allowed = row.allowed;
+        if (!rolesPerms.pagePermissions) rolesPerms.pagePermissions = {};
+        if (!rolesPerms.tabs) rolesPerms.tabs = {};
+        if (tab === null) {
+          rolesPerms.pagePermissions[action] = allowed;
+        } else {
+          if (!rolesPerms.tabs[tab]) rolesPerms.tabs[tab] = {};
+          rolesPerms.tabs[tab][action] = allowed;
+        }
+      }
+    }
+  }
   try {
     const result = await pool.query(
       "SELECT * FROM roles WHERE status IN ($1, $2, $3)",
       ["pending", "Awaiting-Approval","Delete-Approval"]
     );
-
     const roleData = result.rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -314,7 +291,7 @@ exports.getPendingRoles = async (req, res) => {
       approvedBy: r.approved_by || null,
       approveddate: r.approved_at ? r.approved_at.toISOString() : null,
     }));
-    res.json({ ...permissions, roleData });
+    res.json({ permissions: rolesPerms, roleData });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
