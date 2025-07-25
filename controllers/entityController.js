@@ -1,8 +1,14 @@
+
 const { pool } = require("../db");
 const { v4: uuidv4 } = require("uuid");
 
+const globalSession = require("../globalSession.js");
 exports.getRenderVarsEntity = async (req, res) => {
-  const { userId, roleName } = req.body;
+  const session = globalSession.UserSessions[0];
+  if (!session) {
+    return res.status(404).json({ error: "No active session found" });
+  }
+  const roleName = session.role;
   if (!roleName) {
     return res.status(400).json({ success: false, error: "roleName required" });
   }
@@ -22,27 +28,24 @@ exports.getRenderVarsEntity = async (req, res) => {
        WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
       [role_id]
     );
+    // Optimized permission parsing for new structure
     const pages = {};
     for (const row of permResult.rows) {
       const page = row.page_name;
-      const tab = row.tab_name || "default";
+      const tab = row.tab_name;
       const action = row.action;
       const allowed = row.allowed;
       if (!pages[page]) pages[page] = {};
-      if (action === "hasAccess" && tab === "default") {
-        pages[page].hasAccess = allowed;
+      if (tab === null) {
+        if (!pages[page].pagePermissions) pages[page].pagePermissions = {};
+        pages[page].pagePermissions[action] = allowed;
       } else {
-        if (!pages[page][tab]) pages[page][tab] = {};
-        pages[page][tab][action] = allowed;
+        if (!pages[page].tabs) pages[page].tabs = {};
+        if (!pages[page].tabs[tab]) pages[page].tabs[tab] = {};
+        pages[page].tabs[tab][action] = allowed;
       }
     }
-    for (const page of Object.keys(pages)) {
-      for (const tab of Object.keys(pages[page])) {
-        if (tab !== "hasAccess" && !("hasAccess" in pages[page][tab])) {
-          pages[page][tab].hasAccess = false;
-        }
-      }
-    }
+    // Only return permissions for 'entity' page
     res.json({
       entity: pages["entity"] || {},
       pageData: [],
@@ -52,8 +55,13 @@ exports.getRenderVarsEntity = async (req, res) => {
   }
 };
 
+// Uses getRolePermissionsJson logic to fetch permissions for 'hierarchical' page
 exports.getRenderVarsHierarchical = async (req, res) => {
-  const { userId, roleName } = req.body;
+  const session = globalSession.UserSessions[0];
+  if (!session) {
+    return res.status(404).json({ error: "No active session found" });
+  }
+  const roleName = session.role;
   if (!roleName) {
     return res.status(400).json({ success: false, error: "roleName required" });
   }
@@ -73,28 +81,25 @@ exports.getRenderVarsHierarchical = async (req, res) => {
        WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
       [role_id]
     );
+    // Optimized permission parsing for new structure
     const pages = {};
     for (const row of permResult.rows) {
       const page = row.page_name;
-      const tab = row.tab_name || "default";
+      const tab = row.tab_name;
       const action = row.action;
       const allowed = row.allowed;
       if (!pages[page]) pages[page] = {};
-      if (action === "hasAccess" && tab === "default") {
-        pages[page].hasAccess = allowed;
+      if (tab === null) {
+        if (!pages[page].pagePermissions) pages[page].pagePermissions = {};
+        pages[page].pagePermissions[action] = allowed;
       } else {
-        if (!pages[page][tab]) pages[page][tab] = {};
-        pages[page][tab][action] = allowed;
+        if (!pages[page].tabs) pages[page].tabs = {};
+        if (!pages[page].tabs[tab]) pages[page].tabs[tab] = {};
+        pages[page].tabs[tab][action] = allowed;
       }
     }
-    for (const page of Object.keys(pages)) {
-      for (const tab of Object.keys(pages[page])) {
-        if (tab !== "hasAccess" && !("hasAccess" in pages[page][tab])) {
-          pages[page][tab].hasAccess = false;
-        }
-      }
-    }
-    const entitiesResult = await pool.query("SELECT * FROM masterEntity WHERE is_deleted=false");
+    // Get entity hierarchy
+    const entitiesResult = await pool.query("SELECT * FROM masterEntity");
     const entities = entitiesResult.rows;
     const relResult = await pool.query("SELECT * FROM entityRelationships");
     const relationships = relResult.rows;
@@ -125,6 +130,8 @@ exports.getRenderVarsHierarchical = async (req, res) => {
           !relationships.some((rel) => rel.child_entity_id === e.entity_id)
       )
       .map((e) => entityMap[e.entity_name]);
+
+    // Only return permissions for 'hierarchical' page
     res.json({
       hierarchical: pages["hierarchical"] || {},
       pageData: topLevel,
@@ -133,9 +140,6 @@ exports.getRenderVarsHierarchical = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
-
-
-
 
 exports.createEntity = async (req, res) => {
   const entity = req.body;
