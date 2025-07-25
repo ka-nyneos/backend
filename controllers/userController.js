@@ -4,7 +4,7 @@ exports.createUser = async (req, res) => {
   const {
     authentication_type,
     employee_name,
-    role, // e.g., "ADMIN", "SAKSHI"
+    role, 
     username_or_employee_id,
     email,
     mobile,
@@ -18,7 +18,7 @@ exports.createUser = async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Step 1: Insert into users
+   
     const userResult = await client.query(
       `INSERT INTO users (
         authentication_type,
@@ -47,7 +47,6 @@ exports.createUser = async (req, res) => {
 
     const userId = userResult.rows[0].id;
 
-    // Step 2: Fetch role_id from roles table
     const roleResult = await client.query(
       `SELECT id FROM roles WHERE name = $1 OR rolecode = $1`,
       [role]
@@ -59,7 +58,7 @@ exports.createUser = async (req, res) => {
 
     const roleId = roleResult.rows[0].id;
 
-    // Step 3: Insert into user_roles
+ 
     await client.query(
       `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
       [userId, roleId]
@@ -79,13 +78,11 @@ exports.createUser = async (req, res) => {
 exports.getUsers = async (req, res) => {
   const { status } = req.query;
   try {
-    // 1. Get current user session
     const session = globalSession.UserSessions[0];
     if (!session) {
       return res.status(404).json({ error: "No active session found" });
     }
     const userId = session.userId;
-    // 2. Get user's business unit name
     const userResult = await pool.query(
       "SELECT business_unit_name FROM users WHERE id = $1",
       [userId]
@@ -97,7 +94,6 @@ exports.getUsers = async (req, res) => {
     if (!userBu) {
       return res.status(404).json({ error: "User has no business unit assigned" });
     }
-    // 3. Find all descendant business units using recursive CTE
     const entityResult = await pool.query(
       "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
       [userBu]
@@ -122,7 +118,6 @@ exports.getUsers = async (req, res) => {
     if (!buNames.length) {
       return res.status(404).json({ error: "No accessible business units found" });
     }
-    // 4. Query users in allowed business units
     let query = "SELECT * FROM users WHERE business_unit_name = ANY($1)";
     let params = [buNames];
     if (status) {
@@ -130,7 +125,44 @@ exports.getUsers = async (req, res) => {
       params.push(status);
     }
     const result = await pool.query(query, params);
-    res.json({ success: true, users: result.rows });
+    const roleName = session.role;
+    let userCreationPerms = {};
+    if (roleName) {
+      const roleResult = await pool.query(
+        "SELECT id FROM roles WHERE name = $1",
+        [roleName]
+      );
+      if (roleResult.rows.length > 0) {
+        const role_id = roleResult.rows[0].id;
+        const permResult = await pool.query(
+          `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+           FROM role_permissions rp
+           JOIN permissions p ON rp.permission_id = p.id
+           WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+          [role_id]
+        );
+        for (const row of permResult.rows) {
+          if (row.page_name !== "user-creation") continue;
+          const tab = row.tab_name;
+          const action = row.action;
+          const allowed = row.allowed;
+          if (!userCreationPerms["user-creation"]) userCreationPerms["user-creation"] = {};
+          if (tab === null) {
+            if (!userCreationPerms["user-creation"].pagePermissions) userCreationPerms["user-creation"].pagePermissions = {};
+            userCreationPerms["user-creation"].pagePermissions[action] = allowed;
+          } else {
+            if (!userCreationPerms["user-creation"].tabs) userCreationPerms["user-creation"].tabs = {};
+            if (!userCreationPerms["user-creation"].tabs[tab]) userCreationPerms["user-creation"].tabs[tab] = {};
+            userCreationPerms["user-creation"].tabs[tab][action] = allowed;
+          }
+        }
+      }
+    }
+    res.json({
+      success: true,
+      ...(userCreationPerms["user-creation"] ? { "user-creation": userCreationPerms["user-creation"] } : {}),
+      users: result.rows
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -147,7 +179,6 @@ exports.getUserById = async (req, res) => {
   }
 };
 
-// In controllers/userController.js
 exports.updateUser = async (req, res) => {
   const toSnakeCase = (str) =>
     str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
@@ -214,9 +245,6 @@ for (const key in originalFields) {
   }
 };
 
-
-
-
 exports.deleteUser = async (req, res) => {
   const { id } = req.params;
   try {
@@ -269,13 +297,11 @@ exports.getApprovedUsers = async (req, res) => {
 
 exports.getAwaitingData = async (req, res) => {
   try {
-    // 1. Get current user session
     const session = globalSession.UserSessions[0];
     if (!session) {
       return res.status(404).json({ error: "No active session found" });
     }
     const userId = session.userId;
-    // 2. Get user's business unit name
     const userResult = await pool.query(
       "SELECT business_unit_name FROM users WHERE id = $1",
       [userId]
@@ -287,7 +313,6 @@ exports.getAwaitingData = async (req, res) => {
     if (!userBu) {
       return res.status(404).json({ error: "User has no business unit assigned" });
     }
-    // 3. Find all descendant business units using recursive CTE
     const entityResult = await pool.query(
       "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
       [userBu]
@@ -312,12 +337,49 @@ exports.getAwaitingData = async (req, res) => {
     if (!buNames.length) {
       return res.status(404).json({ error: "No accessible business units found" });
     }
-    // 4. Query users in allowed business units and awaiting statuses
-    const result = await pool.query(
+      const result = await pool.query(
       "SELECT * FROM users WHERE business_unit_name = ANY($1) AND (status = 'pending' or status = 'Delete-Approval' or status = 'Awaiting-Approval' or status = 'delete-approval')",
       [buNames]
     );
-    res.json({ success: true, users: result.rows });
+
+    const roleName = session.role;
+    let userCreationPerms = {};
+    if (roleName) {
+      const roleResult = await pool.query(
+        "SELECT id FROM roles WHERE name = $1",
+        [roleName]
+      );
+      if (roleResult.rows.length > 0) {
+        const role_id = roleResult.rows[0].id;
+        const permResult = await pool.query(
+          `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+           FROM role_permissions rp
+           JOIN permissions p ON rp.permission_id = p.id
+           WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+          [role_id]
+        );
+        for (const row of permResult.rows) {
+          if (row.page_name !== "user-creation") continue;
+          const tab = row.tab_name;
+          const action = row.action;
+          const allowed = row.allowed;
+          if (!userCreationPerms["user-creation"]) userCreationPerms["user-creation"] = {};
+          if (tab === null) {
+            if (!userCreationPerms["user-creation"].pagePermissions) userCreationPerms["user-creation"].pagePermissions = {};
+            userCreationPerms["user-creation"].pagePermissions[action] = allowed;
+          } else {
+            if (!userCreationPerms["user-creation"].tabs) userCreationPerms["user-creation"].tabs = {};
+            if (!userCreationPerms["user-creation"].tabs[tab]) userCreationPerms["user-creation"].tabs[tab] = {};
+            userCreationPerms["user-creation"].tabs[tab][action] = allowed;
+          }
+        }
+      }
+    }
+    res.json({
+      success: true,
+      ...(userCreationPerms["user-creation"] ? { "user-creation": userCreationPerms["user-creation"] } : {}),
+      users: result.rows
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -338,7 +400,6 @@ exports.approveMultipleUsers = async (req, res) => {
   }
 
   try {
-    // Step 1: Fetch current statuses
     const { rows: existingUsers } = await pool.query(
       `SELECT id, status FROM users WHERE id = ANY($1::int[])`,
       [userIds]
@@ -357,7 +418,6 @@ exports.approveMultipleUsers = async (req, res) => {
       approved: [],
     };
 
-    // Step 2: Delete users with "Delete-Approval"
     if (toDelete.length > 0) {
       const deleted = await pool.query(
         `DELETE FROM users WHERE id = ANY($1::int[]) RETURNING *`,
@@ -366,7 +426,6 @@ exports.approveMultipleUsers = async (req, res) => {
       results.deleted = deleted.rows;
     }
 
-    // Step 3: Approve remaining users
     if (toApprove.length > 0) {
       const approved = await pool.query(
         `UPDATE users 
