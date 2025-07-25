@@ -72,7 +72,6 @@ const approveBucketing = async (req, res) => {
     const toApprove = existingExposures
       .filter(row => row.status_bucketing  !== "Delete-Approval")
       .map(row => row.id);
-    console.log("toApprove:", toApprove);
 
     const results = {
       deleted: [],
@@ -229,14 +228,45 @@ const getRenderVars = async (req, res) => {
       status_bucketing: 'Pending',
     }));
 
+    // Fetch permissions for 'exposure-bucketing' page for this role
+    const roleName = session.role;
+    let exposureBucketingPerms = {};
+    if (roleName) {
+      const roleResult = await pool.query(
+        "SELECT id FROM roles WHERE name = $1",
+        [roleName]
+      );
+      if (roleResult.rows.length > 0) {
+        const role_id = roleResult.rows[0].id;
+        const permResult = await pool.query(
+          `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+           FROM role_permissions rp
+           JOIN permissions p ON rp.permission_id = p.id
+           WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+          [role_id]
+        );
+        // Build permissions structure for 'exposure-bucketing'
+        for (const row of permResult.rows) {
+          if (row.page_name !== "exposure-bucketing") continue;
+          const tab = row.tab_name;
+          const action = row.action;
+          const allowed = row.allowed;
+          if (!exposureBucketingPerms["exposure-bucketing"]) exposureBucketingPerms["exposure-bucketing"] = {};
+          if (tab === null) {
+            if (!exposureBucketingPerms["exposure-bucketing"].pagePermissions) exposureBucketingPerms["exposure-bucketing"].pagePermissions = {};
+            exposureBucketingPerms["exposure-bucketing"].pagePermissions[action] = allowed;
+          } else {
+            if (!exposureBucketingPerms["exposure-bucketing"].tabs) exposureBucketingPerms["exposure-bucketing"].tabs = {};
+            if (!exposureBucketingPerms["exposure-bucketing"].tabs[tab]) exposureBucketingPerms["exposure-bucketing"].tabs[tab] = {};
+            exposureBucketingPerms["exposure-bucketing"].tabs[tab][action] = allowed;
+          }
+        }
+      }
+    }
     res.json({
-      isLoadable: true,
-      allExposuresTab: false,
-      pendingApprovalTab: true,
-      uploadingTab: false,
-      btnApprove: false,
+      ...(exposureBucketingPerms["exposure-bucketing"] ? { "exposure-bucketing": exposureBucketingPerms["exposure-bucketing"] } : {}),
       buAccessible: buNames,
-      pageData: updatedRows,
+      pageData: updatedRows
     });
   } catch (err) {
     console.error("Error fetching or updating exposures:", err);
