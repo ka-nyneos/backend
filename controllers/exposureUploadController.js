@@ -109,14 +109,45 @@ const getRenderVars = async (req, res) => {
       [buNames]
     );
 
+    // Fetch permissions for 'exposure-upload' page for this role
+    const roleName = session.role;
+    let exposureUploadPerms = {};
+    if (roleName) {
+      const roleResult = await pool.query(
+        "SELECT id FROM roles WHERE name = $1",
+        [roleName]
+      );
+      if (roleResult.rows.length > 0) {
+        const role_id = roleResult.rows[0].id;
+        const permResult = await pool.query(
+          `SELECT p.page_name, p.tab_name, p.action, rp.allowed
+           FROM role_permissions rp
+           JOIN permissions p ON rp.permission_id = p.id
+           WHERE rp.role_id = $1 AND (rp.status = 'Approved' OR rp.status = 'approved')`,
+          [role_id]
+        );
+        // Build permissions structure for 'exposure-upload'
+        for (const row of permResult.rows) {
+          if (row.page_name !== "exposure-upload") continue;
+          const tab = row.tab_name;
+          const action = row.action;
+          const allowed = row.allowed;
+          if (!exposureUploadPerms["exposure-upload"]) exposureUploadPerms["exposure-upload"] = {};
+          if (tab === null) {
+            if (!exposureUploadPerms["exposure-upload"].pagePermissions) exposureUploadPerms["exposure-upload"].pagePermissions = {};
+            exposureUploadPerms["exposure-upload"].pagePermissions[action] = allowed;
+          } else {
+            if (!exposureUploadPerms["exposure-upload"].tabs) exposureUploadPerms["exposure-upload"].tabs = {};
+            if (!exposureUploadPerms["exposure-upload"].tabs[tab]) exposureUploadPerms["exposure-upload"].tabs[tab] = {};
+            exposureUploadPerms["exposure-upload"].tabs[tab][action] = allowed;
+          }
+        }
+      }
+    }
     res.json({
-      isLoadable: true,
-      allExposuresTab: false,
-      pendingApprovalTab: true,
-      uploadingTab: false,
-      btnApprove: false,
+      ...(exposureUploadPerms["exposure-upload"] ? { "exposure-upload": exposureUploadPerms["exposure-upload"] } : {}),
       buAccessible: buNames,
-      pageData: exposuresResult.rows,
+      pageData: exposuresResult.rows
     });
   } catch (err) {
     console.error("Error fetching exposures:", err);
