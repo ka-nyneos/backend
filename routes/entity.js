@@ -12,8 +12,8 @@ router.post("/sync-relationships", entityController.syncRelationships); // fixed
 router.get("/hierarchy", entityController.getEntityHierarchy);
 
 
-router.post("/getRenderVars", entityController.getRenderVarsEntity);
-router.post(
+router.get("/getRenderVars", entityController.getRenderVarsEntity);
+router.get(
   "/getRenderVarsHierarchical",
   entityController.getRenderVarsHierarchical
 );
